@@ -66,11 +66,18 @@ export async function getConnection() {
   return wrapper;
 }
 
-// Export a pool wrapper that supports getConnection() similar to mysql2
+// Export a pool wrapper that supports both getConnection() AND connect()
 export const pool = {
+  // For transaction-style code (like in room.controller.js bookRoom)
+  connect: async () => {
+    return await db.connect(); // Returns raw pg client
+  },
+  // For mysql2-style code
   getConnection: async () => {
     return getConnection();
   },
   // Expose the underlying pg Pool in case callers need it
   _pgPool: db,
 };
+
+export default { query, execute, pool, getConnection };
