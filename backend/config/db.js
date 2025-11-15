@@ -1,39 +1,30 @@
-// backend/config/db.js
 import pkg from "pg";
 import dotenv from "dotenv";
 dotenv.config();
 
 const { Pool } = pkg;
 
-const PG_HOST = process.env.PG_HOST || "127.0.0.1";
-const PG_USER = process.env.PG_USER || "postgres";
-const PG_PASSWORD = process.env.PG_PASSWORD || "";
-const PG_DATABASE = process.env.PG_DATABASE || "hostel_management";
-const PG_PORT = process.env.PG_PORT ? Number(process.env.PG_PORT) : 5432;
-const PG_MAX = process.env.PG_MAX ? Number(process.env.PG_MAX) : 10;
+let db;
 
-console.log("DB config (config/db.js):", {
-  PG_HOST,
-  PG_USER,
-  PG_PASSWORD: PG_PASSWORD ? "*****" : "(empty)",
-  PG_DATABASE,
-  PG_PORT,
-  PG_MAX,
-});
+if (process.env.DATABASE_URL) {
+  // Render production
+  console.log("Using DATABASE_URL from Render");
 
-export const db = new Pool({
-  host: PG_HOST,
-  user: PG_USER,
-  password: PG_PASSWORD,
-  database: PG_DATABASE,
-  port: PG_PORT,
-  max: PG_MAX,
-  idleTimeoutMillis: 30000,
-  // connectionTimeoutMillis: 2000, // optional
-});
+  db = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: { rejectUnauthorized: false },
+  });
+} else {
+  // Local development
+  console.log("Using local PostgreSQL settings");
 
-// Optional: handle pool errors
-db.on("error", (err) => {
-  console.error("Unexpected error on idle Postgres client", err);
-  // process.exit(-1); // you may choose to exit in prod
-});
+  db = new Pool({
+    host: process.env.PG_HOST || "127.0.0.1",
+    user: process.env.PG_USER || "postgres",
+    password: process.env.PG_PASSWORD || "",
+    database: process.env.PG_DATABASE || "hostel_management",
+    port: process.env.PG_PORT ? Number(process.env.PG_PORT) : 5432,
+  });
+}
+
+export { db };
