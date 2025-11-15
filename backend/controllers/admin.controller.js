@@ -1,4 +1,4 @@
-// backend/controllers/admin.controller.js
+// backend/controllers/admin.controller.js - PostgreSQL version
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import dotenv from "dotenv";
@@ -18,16 +18,16 @@ export async function registerAdmin(req, res) {
         .json({ message: "name, email, password required" });
 
     // check existing
-    const raw = await query("SELECT admin_id FROM admins WHERE email = ?", [
+    const result = await query("SELECT admin_id FROM admins WHERE email = $1", [
       email,
     ]);
-    const rows = Array.isArray(raw) && Array.isArray(raw[0]) ? raw[0] : raw;
+    const rows = result.rows;
     if (rows.length)
       return res.status(409).json({ message: "Admin already exists" });
 
     const hashed = await bcrypt.hash(password, 10);
     await execute(
-      "INSERT INTO admins (name, email, password) VALUES (?, ?, ?)",
+      "INSERT INTO admins (name, email, password) VALUES ($1, $2, $3)",
       [name, email, hashed]
     );
     return res.status(201).json({ success: true, message: "Admin registered" });
@@ -37,55 +37,122 @@ export async function registerAdmin(req, res) {
   }
 }
 
+// export async function loginAdmin(req, res) {
+//   try {
+//     const { email, password } = req.body;
+//     if (!email || !password)
+//       return res.status(400).json({ message: "Email and password required" });
+
+//     const result = await query(
+//       "SELECT admin_id, name, email, password FROM admins WHERE email = $1",
+//       [email]
+//     );
+//     const rows = result.rows;
+//     if (!rows.length)
+//       return res.status(401).json({ message: "Invalid email or password" });
+
+//     const admin = rows[0];
+//     const ok = await bcrypt.compare(password, admin.password);
+//     if (!ok)
+//       return res.status(401).json({ message: "Invalid email or password" });
+
+//     // CRITICAL: role must be "admin" (so middleware accepts)
+//     const token = jwt.sign(
+//       {
+//         admin_id: admin.admin_id,
+//         email: admin.email,
+//         role: "admin", // Always use "admin", not "warden"
+//       },
+//       process.env.JWT_SECRET,
+//       { expiresIn: "7d" }
+//     );
+
+//     console.log("Admin login successful:", {
+//       admin_id: admin.admin_id,
+//       email: admin.email,
+//       role: "admin",
+//     });
+
+//     return res.json({
+//       success: true,
+//       message: "Login successful",
+//       token,
+//       admin: {
+//         admin_id: admin.admin_id,
+//         name: admin.name,
+//         email: admin.email,
+//       },
+//     });
+//   } catch (err) {
+//     console.error("loginAdmin error:", err);
+//     return res.status(500).json({ message: "Server error" });
+//   }
+// }
 export async function loginAdmin(req, res) {
   try {
-    const { email, password } = req.body;
-    if (!email || !password)
+    console.log("DEBUG loginAdmin called; body:", req.body);
+
+    const { email, password } = req.body || {};
+    if (!email || !password) {
+      console.log("DEBUG loginAdmin - missing email/password");
       return res.status(400).json({ message: "Email and password required" });
+    }
 
-    const raw = await query(
-      "SELECT admin_id, name, email, password FROM admins WHERE email = ?",
-      [email]
+    const sql =
+      "SELECT admin_id, name, email, password FROM admins WHERE email = $1";
+    const params = [email];
+    console.log("DEBUG loginAdmin - sql:", sql);
+    console.log("DEBUG loginAdmin - params:", params);
+
+    const result = await query(sql, params);
+    console.log(
+      "DEBUG loginAdmin - query result:",
+      result && result.rows ? result.rows : result
     );
-    const rows = Array.isArray(raw) && Array.isArray(raw[0]) ? raw[0] : raw;
-    if (!rows.length)
-      return res.status(401).json({ message: "Invalid email or password" });
 
-    const admin = rows[0];
+    if (!result || !result.rows || result.rows.length === 0) {
+      return res
+        .status(401)
+        .json({ message: "Invalid email or password (no user)" });
+    }
+
+    const admin = result.rows[0];
+    // Defensive check
+    if (!admin.password) {
+      console.error("DEBUG loginAdmin - admin row missing password:", admin);
+      return res
+        .status(500)
+        .json({ message: "Server error - missing password hash" });
+    }
+
     const ok = await bcrypt.compare(password, admin.password);
-    if (!ok)
-      return res.status(401).json({ message: "Invalid email or password" });
+    if (!ok) {
+      console.log("DEBUG loginAdmin - password mismatch for", email);
+      return res
+        .status(401)
+        .json({ message: "Invalid email or password (mismatch)" });
+    }
 
-    // CRITICAL: role must be "admin" (so middleware accepts)
     const token = jwt.sign(
-      {
-        admin_id: admin.admin_id,
-        email: admin.email,
-        role: "admin", // Always use "admin", not "warden"
-      },
+      { admin_id: admin.admin_id, email: admin.email, role: "admin" },
       process.env.JWT_SECRET,
       { expiresIn: "7d" }
     );
-
-    console.log("Admin login successful:", {
-      admin_id: admin.admin_id,
-      email: admin.email,
-      role: "admin",
-    });
 
     return res.json({
       success: true,
       message: "Login successful",
       token,
-      admin: {
-        admin_id: admin.admin_id,
-        name: admin.name,
-        email: admin.email,
-      },
+      admin: { admin_id: admin.admin_id, name: admin.name, email: admin.email },
     });
   } catch (err) {
-    console.error("loginAdmin error:", err);
-    return res.status(500).json({ message: "Server error" });
+    console.error("DEBUG loginAdmin - caught error:", err);
+    // Return full error for debugging (remove in prod)
+    return res.status(500).json({
+      message: "Server error in loginAdmin",
+      error: err.message,
+      stack: err.stack,
+    });
   }
 }
 
@@ -95,11 +162,11 @@ export async function getProfile(req, res) {
     if (!adminId)
       return res.status(400).json({ message: "Missing admin id in token" });
 
-    const raw = await query(
-      "SELECT admin_id, name, email, created_at FROM admins WHERE admin_id = ?",
+    const result = await query(
+      "SELECT admin_id, name, email, created_at FROM admins WHERE admin_id = $1",
       [adminId]
     );
-    const rows = Array.isArray(raw) && Array.isArray(raw[0]) ? raw[0] : raw;
+    const rows = result.rows;
     if (!rows.length)
       return res.status(404).json({ message: "Admin not found" });
 
@@ -125,25 +192,14 @@ export async function getDashboard(req, res) {
       "SELECT COUNT(*) AS cnt FROM payments WHERE status != 'Paid'"
     );
     const openR = await query(
-      "SELECT COUNT(*) AS cnt FROM complaints WHERE status != 'resolved'"
+      "SELECT COUNT(*) AS cnt FROM complaints WHERE status != 'Resolved'"
     );
 
-    const students =
-      Array.isArray(sR) && Array.isArray(sR[0]) ? sR[0][0].cnt : sR[0].cnt ?? 0;
-    const rooms =
-      Array.isArray(rR) && Array.isArray(rR[0]) ? rR[0][0].cnt : rR[0].cnt ?? 0;
-    const paymentsPaid =
-      Array.isArray(paidR) && Array.isArray(paidR[0])
-        ? paidR[0][0].cnt
-        : paidR[0].cnt ?? 0;
-    const paymentsPending =
-      Array.isArray(pendingR) && Array.isArray(pendingR[0])
-        ? pendingR[0][0].cnt
-        : pendingR[0].cnt ?? 0;
-    const complaintsOpen =
-      Array.isArray(openR) && Array.isArray(openR[0])
-        ? openR[0][0].cnt
-        : openR[0].cnt ?? 0;
+    const students = Number(sR.rows[0].cnt) || 0;
+    const rooms = Number(rR.rows[0].cnt) || 0;
+    const paymentsPaid = Number(paidR.rows[0].cnt) || 0;
+    const paymentsPending = Number(pendingR.rows[0].cnt) || 0;
+    const complaintsOpen = Number(openR.rows[0].cnt) || 0;
 
     return res.json({
       students,
@@ -164,14 +220,17 @@ export async function getStudents(req, res) {
     let sql = `SELECT student_id, first_name, last_name, email, phone, gender, room_id, date_of_joining FROM students`;
     const params = [];
     if (q) {
-      sql += " WHERE first_name LIKE ? OR last_name LIKE ? OR email LIKE ?";
+      sql +=
+        " WHERE first_name ILIKE $1 OR last_name ILIKE $2 OR email ILIKE $3";
       params.push(`%${q}%`, `%${q}%`, `%${q}%`);
+      sql += " ORDER BY student_id DESC LIMIT $4 OFFSET $5";
+      params.push(Number(limit), Number(offset));
+    } else {
+      sql += " ORDER BY student_id DESC LIMIT $1 OFFSET $2";
+      params.push(Number(limit), Number(offset));
     }
-    sql += " ORDER BY student_id DESC LIMIT ? OFFSET ?";
-    params.push(Number(limit), Number(offset));
-    const raw = await query(sql, params);
-    const rows = Array.isArray(raw) && Array.isArray(raw[0]) ? raw[0] : raw;
-    return res.json(rows);
+    const result = await query(sql, params);
+    return res.json(result.rows);
   } catch (err) {
     console.error("getStudents error:", err);
     return res.status(500).json({ message: "Server error" });
@@ -188,9 +247,8 @@ export async function getRooms(req, res) {
       GROUP BY r.room_id
       ORDER BY r.room_number
     `;
-    const raw = await query(sql);
-    const rows = Array.isArray(raw) && Array.isArray(raw[0]) ? raw[0] : raw;
-    return res.json(rows);
+    const result = await query(sql);
+    return res.json(result.rows);
   } catch (err) {
     console.error("getRooms error:", err);
     return res.status(500).json({ message: "Server error" });
@@ -214,7 +272,7 @@ export async function updateRoomStatus(req, res) {
         message: "Invalid status. allowed: available, full, maintenance",
       });
     }
-    await execute("UPDATE rooms SET status = ? WHERE room_id = ?", [
+    await execute("UPDATE rooms SET status = $1 WHERE room_id = $2", [
       status,
       room_id,
     ]);
@@ -235,9 +293,8 @@ export async function getPayments(req, res) {
       ORDER BY p.payment_date DESC
       LIMIT 1000
     `;
-    const raw = await query(sql);
-    const rows = Array.isArray(raw) && Array.isArray(raw[0]) ? raw[0] : raw;
-    return res.json(rows);
+    const result = await query(sql);
+    return res.json(result.rows);
   } catch (err) {
     console.error("getPayments error:", err);
     return res.status(500).json({ message: "Server error" });
@@ -254,9 +311,8 @@ export async function getComplaints(req, res) {
       ORDER BY c.created_at DESC
       LIMIT 1000
     `;
-    const raw = await query(sql);
-    const rows = Array.isArray(raw) && Array.isArray(raw[0]) ? raw[0] : raw;
-    return res.json(rows);
+    const result = await query(sql);
+    return res.json(result.rows);
   } catch (err) {
     console.error("getComplaints error:", err);
     return res.status(500).json({ message: "Server error" });
@@ -277,7 +333,7 @@ export async function updateComplaintStatus(req, res) {
       "open",
     ];
     if (!status) return res.status(400).json({ message: "Missing status" });
-    await execute("UPDATE complaints SET status = ? WHERE complaint_id = ?", [
+    await execute("UPDATE complaints SET status = $1 WHERE complaint_id = $2", [
       status,
       complaint_id,
     ]);

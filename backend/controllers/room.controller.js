@@ -13,7 +13,8 @@ export async function getRooms(req, res) {
       ) cnt ON cnt.room_id = r.room_id
       ORDER BY r.room_number
     `);
-    const rows = Array.isArray(raw) && Array.isArray(raw[0]) ? raw[0] : raw;
+    const rows =
+      raw.rows ?? (Array.isArray(raw) && Array.isArray(raw[0]) ? raw[0] : raw);
     return res.json(rows);
   } catch (err) {
     console.error("getRooms error:", err);
@@ -25,11 +26,14 @@ export async function getRooms(req, res) {
 export async function addRoom(req, res) {
   try {
     const { room_number, capacity = 2, status = "Available" } = req.body;
-    const result = await execute(
-      "INSERT INTO rooms (room_number, capacity, occupied, status) VALUES (?, ?, 0, ?)",
+    const insertRes = await query(
+      `INSERT INTO rooms (room_number, capacity, occupied, status)
+       VALUES ($1, $2, 0, $3)
+       RETURNING room_id`,
       [room_number, Number(capacity), status]
     );
-    return res.status(201).json({ room_id: result.insertId });
+    const inserted = insertRes.rows && insertRes.rows[0];
+    return res.status(201).json({ room_id: inserted?.room_id ?? null });
   } catch (err) {
     console.error("addRoom error:", err);
     return res.status(500).json({ message: "Server error" });
@@ -43,24 +47,32 @@ export async function updateRoom(req, res) {
     const { room_number, capacity, status } = req.body;
     const updates = [];
     const params = [];
+    let idx = 1;
+
     if (room_number !== undefined) {
-      updates.push("room_number = ?");
+      updates.push(`room_number = $${idx++}`);
       params.push(room_number);
     }
     if (capacity !== undefined) {
-      updates.push("capacity = ?");
+      updates.push(`capacity = $${idx++}`);
       params.push(Number(capacity));
     }
     if (status !== undefined) {
-      updates.push("status = ?");
+      updates.push(`status = $${idx++}`);
       params.push(status);
     }
     if (!updates.length) return res.status(400).json({ message: "No fields" });
-    params.push(id);
-    await execute(
-      `UPDATE rooms SET ${updates.join(", ")} WHERE room_id = ?`,
-      params
-    );
+
+    params.push(id); // last param is id
+    const sql = `UPDATE rooms SET ${updates.join(
+      ", "
+    )} WHERE room_id = $${idx}`;
+    const updateRes = await query(sql, params);
+
+    if (updateRes.rowCount === 0) {
+      return res.status(404).json({ message: "Room not found" });
+    }
+
     return res.json({ success: true });
   } catch (err) {
     console.error("updateRoom error:", err);
@@ -72,7 +84,12 @@ export async function updateRoom(req, res) {
 export async function deleteRoom(req, res) {
   try {
     const id = req.params.id;
-    await execute("DELETE FROM rooms WHERE room_id = ?", [id]);
+    const delRes = await query("DELETE FROM rooms WHERE room_id = $1", [id]);
+
+    if (delRes.rowCount === 0) {
+      return res.status(404).json({ message: "Room not found" });
+    }
+
     return res.json({ success: true });
   } catch (err) {
     console.error("deleteRoom error:", err);
@@ -96,59 +113,61 @@ export async function bookRoom(req, res) {
       .status(400)
       .json({ message: "student_id required (login as student)" });
 
-  const conn = await pool.getConnection();
+  const client = await pool.connect();
   try {
-    await conn.beginTransaction();
+    await client.query("BEGIN");
 
     // lock room row
-    const [roomRows] = await conn.query(
-      "SELECT * FROM rooms WHERE room_id = ? FOR UPDATE",
+    const roomRes = await client.query(
+      "SELECT * FROM rooms WHERE room_id = $1 FOR UPDATE",
       [roomId]
     );
+    const roomRows = roomRes.rows || [];
     if (!roomRows.length) {
-      await conn.rollback();
+      await client.query("ROLLBACK");
       return res.status(404).json({ message: "Room not found" });
     }
     const room = roomRows[0];
 
     // recalc occupancy if needed or use occupied column
-    const occupied = room.occupied || 0;
-    const capacity = room.capacity || 1;
+    const occupied = Number(room.occupied || 0);
+    const capacity = Number(room.capacity || 1);
     if (occupied >= capacity || String(room.status).toLowerCase() === "full") {
-      await conn.rollback();
+      await client.query("ROLLBACK");
       return res.status(409).json({ message: "Room is full" });
     }
 
     // lock student row
-    const [studentRows] = await conn.query(
-      "SELECT * FROM students WHERE student_id = ? FOR UPDATE",
+    const studentRes = await client.query(
+      "SELECT * FROM students WHERE student_id = $1 FOR UPDATE",
       [studentId]
     );
+    const studentRows = studentRes.rows || [];
     if (!studentRows.length) {
-      await conn.rollback();
+      await client.query("ROLLBACK");
       return res.status(404).json({ message: "Student not found" });
     }
     const student = studentRows[0];
     if (student.room_id) {
-      await conn.rollback();
+      await client.query("ROLLBACK");
       return res.status(400).json({ message: "Student already has a room" });
     }
 
     // assign student to room
-    await conn.execute("UPDATE students SET room_id = ? WHERE student_id = ?", [
-      roomId,
-      studentId,
-    ]);
+    await client.query(
+      "UPDATE students SET room_id = $1 WHERE student_id = $2",
+      [roomId, studentId]
+    );
 
     // increment occupied & update status if full
     const newOccupied = occupied + 1;
     const newStatus = newOccupied >= capacity ? "Full" : "Available";
-    await conn.execute(
-      "UPDATE rooms SET occupied = ?, status = ? WHERE room_id = ?",
+    await client.query(
+      "UPDATE rooms SET occupied = $1, status = $2 WHERE room_id = $3",
       [newOccupied, newStatus, roomId]
     );
 
-    await conn.commit();
+    await client.query("COMMIT");
     return res.json({
       success: true,
       message: "Room booked",
@@ -156,13 +175,15 @@ export async function bookRoom(req, res) {
     });
   } catch (err) {
     try {
-      await conn.rollback();
-    } catch (e) {}
+      await client.query("ROLLBACK");
+    } catch (rollbackErr) {
+      console.error("rollback error:", rollbackErr);
+    }
     console.error("bookRoom error:", err);
     return res
       .status(500)
       .json({ message: "Server error", detail: err.message });
   } finally {
-    conn.release();
+    client.release();
   }
 }

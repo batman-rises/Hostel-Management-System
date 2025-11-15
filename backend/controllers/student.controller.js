@@ -1,7 +1,7 @@
 // backend/controllers/student.controller.js
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import { query, execute } from "../utils/dbHelper.js";
+import { query, execute, pool } from "../utils/dbHelper.js";
 import dotenv from "dotenv";
 dotenv.config();
 
@@ -19,11 +19,20 @@ export async function registerStudent(req, res) {
       return res.status(400).json({ message: "Missing required fields" });
     }
 
+    // helper normalize
+    const normalize = (r) => {
+      if (!r) return [];
+      if (Array.isArray(r) && Array.isArray(r[0])) return r[0];
+      if (r.rows) return r.rows;
+      return r;
+    };
+
     // Check if email already exists
-    const [existingRows] = await query(
-      "SELECT student_id FROM students WHERE email = ? LIMIT 1",
+    const existingRes = await query(
+      "SELECT student_id FROM students WHERE email = $1 LIMIT 1",
       [email]
     );
+    const existingRows = normalize(existingRes);
     if (existingRows && existingRows.length > 0) {
       return res.status(409).json({ message: "Email already registered" });
     }
@@ -31,13 +40,14 @@ export async function registerStudent(req, res) {
     // Hash password
     const hashed = await bcrypt.hash(password, 10);
 
-    // Insert student record (use execute for INSERT/UPDATE)
+    // Insert student record (use RETURNING to get id)
     const sql = `
       INSERT INTO students 
       (first_name, last_name, gender, phone, email, password, room_id, date_of_joining) 
-      VALUES (?, ?, ?, ?, ?, ?, ?, CURDATE())
+      VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_DATE)
+      RETURNING student_id
     `;
-    const result = await execute(sql, [
+    const insertRes = await query(sql, [
       first_name,
       last_name,
       gender || null,
@@ -47,8 +57,8 @@ export async function registerStudent(req, res) {
       room_id || null,
     ]);
 
-    // result.insertId contains the new id
-    const studentId = result.insertId;
+    const inserted = normalize(insertRes)[0];
+    const studentId = inserted?.student_id ?? null;
 
     console.log("Inserted student id:", studentId);
 
@@ -84,9 +94,13 @@ export async function registerStudent(req, res) {
 export async function loginStudent(req, res) {
   try {
     const { email, password } = req.body;
-    const [rows] = await query("SELECT * FROM students WHERE email = ?", [
+    const resRaw = await query("SELECT * FROM students WHERE email = $1", [
       email,
     ]);
+    const rows =
+      (resRaw.rows && resRaw.rows) ||
+      (Array.isArray(resRaw) && resRaw[0]) ||
+      resRaw;
 
     if (!rows || rows.length === 0) {
       return res.status(400).json({ message: "Invalid email or password" });
@@ -132,13 +146,13 @@ export async function getProfile(req, res) {
     const id = req.user?.student_id;
     console.log("getProfile: student_id:", id);
 
-    const sql = `SELECT student_id, first_name, last_name, gender, phone, email, room_id, date_of_joining FROM students WHERE student_id = ?`;
-    const rows = await query(sql, [id]);
-    console.log("getProfile: query result (raw):", rows);
+    const sql = `SELECT student_id, first_name, last_name, gender, phone, email, room_id, date_of_joining FROM students WHERE student_id = $1`;
+    const result = await query(sql, [id]);
+    console.log("getProfile: query result (raw):", result);
 
-    // if query wrapper returns [rows, fields] handle both possibilities:
     const dataRows =
-      Array.isArray(rows) && Array.isArray(rows[0]) ? rows[0] : rows;
+      (result.rows && result.rows) ||
+      (Array.isArray(result) && Array.isArray(result[0]) ? result[0] : result);
     console.log("getProfile: normalized rows:", dataRows);
 
     if (!dataRows.length) {
@@ -162,10 +176,14 @@ export async function getStudentRoom(req, res) {
   try {
     const id = req.user.student_id;
 
-    const [studentRows] = await query(
-      "SELECT room_id FROM students WHERE student_id = ?",
+    const studentRes = await query(
+      "SELECT room_id FROM students WHERE student_id = $1",
       [id]
     );
+    const studentRows =
+      studentRes.rows ||
+      (Array.isArray(studentRes) && studentRes[0]) ||
+      studentRes;
     if (!studentRows || studentRows.length === 0) {
       return res.status(404).json({ message: "Student not found" });
     }
@@ -178,9 +196,11 @@ export async function getStudentRoom(req, res) {
     }
 
     // note: schema uses `room_id` as PK in rooms table
-    const [roomRows] = await query("SELECT * FROM rooms WHERE room_id = ?", [
+    const roomRes = await query("SELECT * FROM rooms WHERE room_id = $1", [
       roomId,
     ]);
+    const roomRows =
+      roomRes.rows || (Array.isArray(roomRes) && roomRes[0]) || roomRes;
     if (!roomRows || roomRows.length === 0) {
       return res.status(404).json({ message: "Room not found" });
     }
@@ -207,26 +227,27 @@ export async function updateProfile(req, res) {
     const { first_name, last_name, phone, gender, password } = req.body;
     const fields = [];
     const params = [];
+    let idx = 1;
 
     if (first_name !== undefined) {
-      fields.push("first_name = ?");
+      fields.push(`first_name = $${idx++}`);
       params.push(first_name);
     }
     if (last_name !== undefined) {
-      fields.push("last_name = ?");
+      fields.push(`last_name = $${idx++}`);
       params.push(last_name);
     }
     if (phone !== undefined) {
-      fields.push("phone = ?");
+      fields.push(`phone = $${idx++}`);
       params.push(phone);
     }
     if (gender !== undefined) {
-      fields.push("gender = ?");
+      fields.push(`gender = $${idx++}`);
       params.push(gender);
     }
     if (password) {
       const hashed = await bcrypt.hash(password, 10);
-      fields.push("password = ?");
+      fields.push(`password = $${idx++}`);
       params.push(hashed);
     }
 
@@ -234,15 +255,22 @@ export async function updateProfile(req, res) {
       return res.status(400).json({ message: "No fields to update" });
 
     params.push(sid);
-    const sql = `UPDATE students SET ${fields.join(", ")} WHERE student_id = ?`;
-    await execute(sql, params);
+    const sql = `UPDATE students SET ${fields.join(
+      ", "
+    )} WHERE student_id = $${idx}`;
+    const updateRes = await query(sql, params);
+
+    if (updateRes.rowCount === 0) {
+      return res.status(404).json({ message: "Student not found" });
+    }
 
     // return fresh profile
     const raw = await query(
-      "SELECT student_id, first_name, last_name, phone, gender, email, room_id, date_of_joining FROM students WHERE student_id = ?",
+      "SELECT student_id, first_name, last_name, phone, gender, email, room_id, date_of_joining FROM students WHERE student_id = $1",
       [sid]
     );
-    const rows = Array.isArray(raw) && Array.isArray(raw[0]) ? raw[0] : raw;
+    const rows =
+      raw.rows || (Array.isArray(raw) && Array.isArray(raw[0]) ? raw[0] : raw);
     return res.json(rows[0]);
   } catch (err) {
     console.error("updateProfile error:", err);

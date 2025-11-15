@@ -1,7 +1,7 @@
-// src/components/Navbar.jsx
+// src/components/Navbar.jsx - Fixed with role-based complaints link
 import React from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { useAuth } from "../context/AuthContext"; // named import (matches your AuthContext)
+import { useAuth } from "../context/AuthContext";
 
 export default function Navbar() {
   const { token, user, logout, loading } = useAuth();
@@ -12,8 +12,11 @@ export default function Navbar() {
     navigate("/login");
   };
 
-  // role detection: prefer user.role, fallback to localStorage (avoids flicker while loading)
+  // Role detection: prefer user.role, fallback to localStorage
   const role = user?.role || localStorage.getItem("role");
+
+  // Determine complaints link based on role
+  const complaintsLink = role === "admin" ? "/admin/complaints" : "/complaints";
 
   return (
     <nav className="w-full bg-slate-900 text-white p-4">
@@ -23,29 +26,12 @@ export default function Navbar() {
             HostelMS
           </Link>
 
-          {/* Public links */}
-          <Link to="/rooms" className="hover:underline">
-            Rooms
-          </Link>
-          <Link to="/payments" className="hover:underline">
-            Payments
-          </Link>
-          <Link to="/complaints" className="hover:underline">
-            Complaints
-          </Link>
-
-          {/* Profile visible when logged */}
-          {token && (
-            <Link to="/profile" className="hover:underline">
-              Profile
-            </Link>
-          )}
-
-          {/* Admin links */}
-          {role === "admin" && (
+          {/* Show different links based on role */}
+          {role === "admin" ? (
             <>
+              {/* Admin Navigation */}
               <Link to="/admin" className="hover:underline">
-                Admin
+                Dashboard
               </Link>
               <Link to="/admin/students" className="hover:underline">
                 Students
@@ -53,6 +39,30 @@ export default function Navbar() {
               <Link to="/admin/rooms" className="hover:underline">
                 Rooms
               </Link>
+              <Link to="/admin/payments" className="hover:underline">
+                Payments
+              </Link>
+              <Link to="/admin/complaints" className="hover:underline">
+                Complaints
+              </Link>
+            </>
+          ) : (
+            <>
+              {/* Student Navigation */}
+              <Link to="/rooms" className="hover:underline">
+                Rooms
+              </Link>
+              <Link to="/payments" className="hover:underline">
+                Payments
+              </Link>
+              <Link to="/complaints" className="hover:underline">
+                Complaints
+              </Link>
+              {token && (
+                <Link to="/profile" className="hover:underline">
+                  Profile
+                </Link>
+              )}
             </>
           )}
         </div>
@@ -63,11 +73,13 @@ export default function Navbar() {
           ) : token ? (
             <div className="flex items-center gap-3">
               <span className="text-sm">
-                {user?.first_name || user?.name || "User"}
+                {role === "admin" && "Super Admin"}
+                {role === "student" && (user?.first_name || "Student")}
+                {!role && (user?.first_name || user?.name || "User")}
               </span>
               <button
                 onClick={handleLogout}
-                className="bg-blue-600 px-3 py-1 rounded"
+                className="bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded transition"
               >
                 Logout
               </button>
@@ -75,7 +87,7 @@ export default function Navbar() {
           ) : (
             <button
               onClick={() => navigate("/login")}
-              className="bg-blue-600 px-3 py-1 rounded"
+              className="bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded transition"
             >
               Login
             </button>

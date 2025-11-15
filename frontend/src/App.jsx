@@ -1,6 +1,6 @@
-// src/App.jsx
+// src/App.jsx - Fixed with proper role-based routing
 import React from "react";
-import { Routes, Route, useLocation } from "react-router-dom";
+import { Routes, Route, useLocation, Navigate } from "react-router-dom";
 import Navbar from "./components/Navbar";
 
 import Login from "./pages/Login";
@@ -19,12 +19,14 @@ import AdminStudents from "./pages/Admin/Student";
 import AdminRooms from "./pages/Admin/Rooms";
 import AdminPayments from "./pages/Admin/Payments";
 import AdminComplaints from "./pages/Admin/Complaints";
+import { useAuth } from "./context/AuthContext"; // Import your auth context
 
 export default function App() {
   const location = useLocation();
+  const { user } = useAuth(); // Get current user to check role
 
-  // Hide navbar for landing page. Add more paths to hide as needed.
-  const hideNavbarOn = ["/"]; // e.g. ["/", "/login", "/register"]
+  // Hide navbar for landing page
+  const hideNavbarOn = ["/", "/login", "/register"];
   const shouldHideNavbar = hideNavbarOn.includes(location.pathname);
 
   return (
@@ -33,6 +35,11 @@ export default function App() {
 
       <main className="flex-grow">
         <Routes>
+          {/* Public routes */}
+          <Route path="/" element={<LandingPage />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/register" element={<Register />} />
+
           {/* Admin routes */}
           <Route
             path="/admin"
@@ -75,8 +82,7 @@ export default function App() {
             }
           />
 
-          {/* Public / student routes */}
-          <Route path="/" element={<LandingPage />} />
+          {/* Student routes */}
           <Route
             path="/dashboard"
             element={
@@ -85,9 +91,6 @@ export default function App() {
               </ProtectedRoute>
             }
           />
-          <Route path="/login" element={<Login />} />
-          <Route path="/register" element={<Register />} />
-
           <Route
             path="/rooms"
             element={
@@ -113,14 +116,6 @@ export default function App() {
             }
           />
           <Route
-            path="/complaints"
-            element={
-              <ProtectedRoute>
-                <Complaints />
-              </ProtectedRoute>
-            }
-          />
-          <Route
             path="/profile"
             element={
               <ProtectedRoute>
@@ -129,7 +124,32 @@ export default function App() {
             }
           />
 
-          <Route path="*" element={<div className="p-8">Page not found</div>} />
+          {/* Complaints route - redirects based on role */}
+          <Route
+            path="/complaints"
+            element={
+              <ProtectedRoute>
+                {user?.role === "admin" ? (
+                  <Navigate to="/admin/complaints" replace />
+                ) : (
+                  <Complaints />
+                )}
+              </ProtectedRoute>
+            }
+          />
+
+          {/* 404 */}
+          <Route
+            path="*"
+            element={
+              <div className="p-8 text-center">
+                <h1 className="text-2xl font-bold">404 - Page not found</h1>
+                <p className="mt-2">
+                  The page you're looking for doesn't exist.
+                </p>
+              </div>
+            }
+          />
         </Routes>
       </main>
     </div>

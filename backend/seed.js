@@ -1,4 +1,4 @@
-// backend/seed.js
+// backend/seed.js  (POSTGRES VERSION)
 import bcrypt from "bcryptjs";
 import { query, execute, pool } from "./utils/dbHelper.js";
 
@@ -13,148 +13,123 @@ async function safeExecute(sql, params = []) {
 }
 
 async function rowExists(sql, params = []) {
-  const [rows] = await query(sql, params);
-  return Array.isArray(rows) && rows.length > 0;
+  const res = await query(sql, params);
+  return res.rows.length > 0;
 }
 
-async function makeSampleRooms() {
-  console.log("Seeding rooms...");
-  // try to create a rooms table only if it doesn't exist (best-effort)
-  await safeExecute(`
-    CREATE TABLE IF NOT EXISTS rooms (
-      room_id INT AUTO_INCREMENT PRIMARY KEY,
-      name VARCHAR(100),
-      capacity INT DEFAULT 1,
-      price DECIMAL(10,2) DEFAULT 0,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
+/* ----------------------------------------------------
+   ADMIN SEED  (Login: admin@example.com / Admin@123)
+----------------------------------------------------- */
+async function seedAdmin() {
+  console.log("Seeding admin...");
 
-  const sampleRooms = [
-    { name: "A-101", capacity: 2, price: 2000 },
-    { name: "A-102", capacity: 2, price: 2000 },
-    { name: "B-201", capacity: 1, price: 1500 },
+  const adminEmail = "admin@example.com";
+  const passwordPlain = "Admin@123";
+
+  const exists = await rowExists(`SELECT 1 FROM admins WHERE email = $1`, [
+    adminEmail,
+  ]);
+
+  if (exists) {
+    console.log("Admin already exists:", adminEmail);
+    return;
+  }
+
+  const hashed = await bcrypt.hash(passwordPlain, 10);
+
+  const res = await safeExecute(
+    `INSERT INTO admins (name, email, password)
+     VALUES ($1, $2, $3)
+     RETURNING admin_id`,
+    ["Super Admin", adminEmail, hashed]
+  );
+
+  console.log("Inserted admin:", adminEmail, "id:", res.rows[0].admin_id);
+}
+
+/* ----------------------------------------------------
+   ROOMS SEED
+----------------------------------------------------- */
+async function seedRooms() {
+  console.log("Seeding rooms...");
+
+  const rooms = [
+    { room_number: "A101", capacity: 2, price: 1500 },
+    { room_number: "A102", capacity: 2, price: 1500 },
+    { room_number: "B201", capacity: 3, price: 2000 },
   ];
 
-  for (const r of sampleRooms) {
-    const exists = await rowExists("SELECT 1 FROM rooms WHERE name = ?", [
-      r.name,
-    ]);
-    if (!exists) {
-      const res = await safeExecute(
-        "INSERT INTO rooms (name, capacity, price) VALUES (?, ?, ?)",
-        [r.name, r.capacity, r.price]
-      );
-      console.log("Inserted room:", r.name, "id:", res.insertId);
-    } else {
-      console.log("Room already exists:", r.name);
+  for (const r of rooms) {
+    const exists = await rowExists(
+      `SELECT 1 FROM rooms WHERE room_number = $1`,
+      [r.room_number]
+    );
+
+    if (exists) {
+      console.log("Room exists:", r.room_number);
+      continue;
     }
-  }
-}
 
-async function makeSampleStudents() {
-  console.log("Seeding students...");
-
-  // ensure students table present (best-effort)
-  await safeExecute(`
-    CREATE TABLE IF NOT EXISTS students (
-      student_id INT AUTO_INCREMENT PRIMARY KEY,
-      first_name VARCHAR(50),
-      last_name VARCHAR(50),
-      gender VARCHAR(10),
-      phone VARCHAR(20),
-      email VARCHAR(150) UNIQUE,
-      password VARCHAR(255),
-      room_id INT NULL,
-      date_of_joining DATE,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  const sample = {
-    first_name: "Alice",
-    last_name: "Kumar",
-    email: "alice@test.com",
-    phone: "9999000001",
-    gender: "Female",
-    password_plain: "123",
-  };
-
-  const exists = await rowExists("SELECT 1 FROM students WHERE email = ?", [
-    sample.email,
-  ]);
-  if (!exists) {
-    const hashed = await bcrypt.hash(sample.password_plain, 10);
     const res = await safeExecute(
-      `INSERT INTO students
-      (first_name,last_name,gender,phone,email,password,date_of_joining)
-      VALUES (?, ?, ?, ?, ?, ?, CURDATE())`,
-      [
-        sample.first_name,
-        sample.last_name,
-        sample.gender,
-        sample.phone,
-        sample.email,
-        hashed,
-      ]
+      `INSERT INTO rooms (room_number, capacity, price)
+       VALUES ($1, $2, $3)
+       RETURNING room_id`,
+      [r.room_number, r.capacity, r.price]
     );
-    console.log("Inserted student:", sample.email, "id:", res.insertId);
-  } else {
-    console.log("Student already exists:", sample.email);
+
+    console.log("Inserted room:", r.room_number, "id:", res.rows[0].room_id);
   }
 }
 
-async function makeAdminUser() {
-  // not all projects have an 'admins' table — this is best-effort
-  try {
-    await safeExecute(`
-      CREATE TABLE IF NOT EXISTS admins (
-        admin_id INT AUTO_INCREMENT PRIMARY KEY,
-        name VARCHAR(100),
-        email VARCHAR(150) UNIQUE,
-        password VARCHAR(255),
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
+/* ----------------------------------------------------
+   STUDENT SEED  (Login: student@example.com / Student@123)
+----------------------------------------------------- */
+async function seedStudent() {
+  console.log("Seeding student...");
 
-    const adminEmail = "admin@hostel.test";
-    const exists = await rowExists("SELECT 1 FROM admins WHERE email = ?", [
-      adminEmail,
-    ]);
-    if (!exists) {
-      const hashed = await bcrypt.hash("admin123", 10);
-      const r = await safeExecute(
-        "INSERT INTO admins (name, email, password) VALUES (?, ?, ?)",
-        ["Admin User", adminEmail, hashed]
-      );
-      console.log("Inserted admin:", adminEmail, "id:", r.insertId);
-    } else {
-      console.log("Admin already exists:", adminEmail);
-    }
-  } catch (err) {
-    console.log(
-      "Skipping admin seeding (admins table may not be used).",
-      err.message
-    );
+  const email = "student@example.com";
+  const passwordPlain = "Student@123";
+
+  const exists = await rowExists(`SELECT 1 FROM students WHERE email = $1`, [
+    email,
+  ]);
+
+  if (exists) {
+    console.log("Student already exists:", email);
+    return;
   }
+
+  const hashed = await bcrypt.hash(passwordPlain, 10);
+
+  const res = await safeExecute(
+    `INSERT INTO students 
+      (first_name, last_name, gender, phone, email, password, date_of_joining)
+     VALUES ($1, $2, $3, $4, $5, $6, CURRENT_DATE)
+     RETURNING student_id`,
+    ["John", "Doe", "Male", "9999000000", email, hashed]
+  );
+
+  console.log("Inserted student:", email, "id:", res.rows[0].student_id);
 }
 
+/* ----------------------------------------------------
+   MAIN
+----------------------------------------------------- */
 async function main() {
-  console.log("Starting seed...");
+  console.log("🌱 Starting PostgreSQL seed...");
+
   try {
-    await makeSampleRooms();
-    await makeSampleStudents();
-    await makeAdminUser();
-    console.log("Seeding complete.");
+    await seedAdmin();
+    await seedRooms();
+    await seedStudent();
+
+    console.log("✅ Seeding complete.");
   } catch (err) {
-    console.error("Seeding failed:", err);
+    console.error("❌ Seeding failed:", err);
   } finally {
-    // close pool
     try {
-      if (pool && typeof pool.end === "function") {
-        await pool.end();
-      }
-    } catch {}
+      await pool._pgPool.end(); // graceful shutdown
+    } catch (e) {}
     process.exit();
   }
 }
