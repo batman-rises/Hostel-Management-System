@@ -43,7 +43,7 @@ A full-stack web application for managing hostel operations including student re
 ### Backend
 - **Runtime**: Node.js
 - **Framework**: Express 5
-- **Database**: PostgreSQL (Render)
+- **Database**: mySQL (Render)
 - **ORM**: Native SQL with pg driver
 - **Authentication**: JWT + bcrypt
 - **Deployment**: Render
