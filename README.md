@@ -396,7 +396,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - [React](https://reactjs.org/) - Frontend framework
 - [Express](https://expressjs.com/) - Backend framework
-- [PostgreSQL](https://www.postgresql.org/) - Database
+- [mySQL](https://www.postgresql.org/) - Database
 - [Tailwind CSS](https://tailwindcss.com/) - CSS framework
 - [Render](https://render.com/) - Backend hosting
 - [Vercel](https://vercel.com/) - Frontend hosting
