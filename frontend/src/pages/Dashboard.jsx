@@ -21,7 +21,6 @@ export default function Dashboard() {
         if (!mounted) return;
         setStats(res.data);
       } catch (err) {
-        // swallow — admin-only data; don't break UI
         console.warn(
           "Dashboard: failed to load admin stats",
           err?.message ?? err
@@ -34,180 +33,205 @@ export default function Dashboard() {
     return () => (mounted = false);
   }, [user]);
 
-  const s = stats ?? {
-    students: "—",
-    rooms: "—",
-    paymentsPaid: "—",
-    paymentsPending: "—",
-    complaintsOpen: "—",
+  // Get time-based greeting
+  const getGreeting = () => {
+    const hour = new Date().getHours();
+    if (hour < 12) return "Good Morning";
+    if (hour < 17) return "Good Afternoon";
+    return "Good Evening";
   };
 
+  const isAdmin = user?.role === "admin";
+
   return (
-    <div className="max-w-[1200px] mx-auto p-6">
-      {/* Top header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
-        <div>
-          <h1 className="text-4xl font-extrabold text-slate-900">Dashboard</h1>
-          <p className="mt-2 text-slate-500 max-w-xl">
-            Welcome to the Hostel Management System — quick overview and useful
-            shortcuts.
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50">
+      <div className="max-w-[1200px] mx-auto p-6 py-12">
+        {/* Welcome Hero Section */}
+        <div className="mb-12 text-center">
+          <h1 className="text-5xl font-bold text-slate-900 mb-3">
+            {getGreeting()}, {user?.name || "Guest"}! 👋
+          </h1>
+          <p className="text-xl text-slate-600 max-w-2xl mx-auto">
+            Welcome to your Hostel Management portal. Everything you need is
+            just a click away.
           </p>
         </div>
 
-        <div className="flex gap-3 items-center">
-          <button
+        {/* Quick Action Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
+          <QuickActionCard
+            title="My Room"
+            description="View room details and amenities"
+            icon="🏠"
+            color="bg-gradient-to-br from-blue-500 to-blue-600"
             onClick={() => navigate("/rooms")}
-            className="hidden sm:inline-flex items-center px-4 py-2 border rounded bg-white text-sm shadow-sm hover:shadow-md"
-          >
-            Browse Rooms
-          </button>
-          <button
+          />
+          <QuickActionCard
+            title="Payments"
+            description="Manage your payments and dues"
+            icon="💳"
+            color="bg-gradient-to-br from-green-500 to-green-600"
             onClick={() => navigate("/payments")}
-            className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded text-sm hover:bg-blue-700"
-          >
-            Payments
-          </button>
-        </div>
-      </div>
-
-      {/* Stat cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        <StatCard
-          title="Students"
-          hint="Total registered"
-          value={s.students}
-          loading={loading}
-        />
-        <StatCard
-          title="Rooms"
-          hint="Total rooms"
-          value={s.rooms}
-          loading={loading}
-        />
-        <StatCard
-          title="Payments (Paid)"
-          hint="Recorded as paid"
-          value={s.paymentsPaid}
-          loading={loading}
-        />
-        <StatCard
-          title="Open complaints"
-          hint="Unresolved"
-          value={s.complaintsOpen}
-          loading={loading}
-        />
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 bg-white rounded-lg shadow-sm p-6 border border-slate-100">
-          <h2 className="text-lg font-semibold mb-3">Recent actions</h2>
-          <p className="text-sm text-slate-600 mb-6">
-            Quick access to pages you use most. Click any card to open the page.
-          </p>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <ActionCard
-              title="Payments"
-              subtitle="View all payments"
-              onClick={() => navigate("/payments")}
-            />
-            <ActionCard
-              title="Complaints"
-              subtitle="Manage complaints"
-              onClick={() => navigate("/complaints")}
-            />
-            <ActionCard
-              title="Students"
-              subtitle="Student list"
-              onClick={() => navigate("/admin/students")}
-            />
-          </div>
-
-          <div className="mt-6 text-sm text-slate-500">
-            Tip: Admins can manage rooms and mark complaints/resolutions from
-            the admin area.
-          </div>
+          />
+          <QuickActionCard
+            title="Complaints"
+            description="Submit or track complaints"
+            icon="📝"
+            color="bg-gradient-to-br from-orange-500 to-orange-600"
+            onClick={() => navigate("/complaints")}
+          />
+          <QuickActionCard
+            title="Profile"
+            description="Update your information"
+            icon="👤"
+            color="bg-gradient-to-br from-purple-500 to-purple-600"
+            onClick={() => navigate("/profile")}
+          />
         </div>
 
-        <aside className="bg-white rounded-lg shadow-sm p-6 border border-slate-100">
-          <h3 className="text-lg font-semibold mb-3">Quick summary</h3>
-          <div className="space-y-4 text-sm text-slate-700">
-            <SummaryLine
-              label="Available"
-              value={s.rooms !== "—" ? "See rooms" : "—"}
-              actionText="Browse"
-              onClick={() => navigate("/rooms")}
-            />
-            <SummaryLine
-              label="Pending payments"
-              value={s.paymentsPending ?? "—"}
-              actionText="Pay"
-              onClick={() => navigate("/payments")}
-            />
-            <SummaryLine label="Open complaints" value={s.complaintsOpen} />
+        {/* Admin Stats Section - Only for Admins */}
+        {isAdmin && (
+          <div className="mb-12">
+            <h2 className="text-2xl font-bold text-slate-900 mb-6 text-center">
+              Admin Overview
+            </h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+              <StatCard
+                title="Students"
+                value={stats?.students ?? "—"}
+                loading={loading}
+                icon="👥"
+              />
+              <StatCard
+                title="Rooms"
+                value={stats?.rooms ?? "—"}
+                loading={loading}
+                icon="🏢"
+              />
+              <StatCard
+                title="Paid"
+                value={stats?.paymentsPaid ?? "—"}
+                loading={loading}
+                icon="✅"
+              />
+              <StatCard
+                title="Pending"
+                value={stats?.paymentsPending ?? "—"}
+                loading={loading}
+                icon="⏳"
+              />
+              <StatCard
+                title="Open Issues"
+                value={stats?.complaintsOpen ?? "—"}
+                loading={loading}
+                icon="⚠️"
+              />
+            </div>
           </div>
-        </aside>
+        )}
+
+        {/* Information Cards */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <InfoCard
+            title="Need Help?"
+            description="Have questions or facing issues? Our support team is here to help you 24/7."
+            action="Contact Support"
+            actionColor="bg-blue-600 hover:bg-blue-700"
+            onClick={() => navigate("/complaints")}
+          />
+          <InfoCard
+            title="Important Notice"
+            description="Remember to pay your monthly dues by the 5th of each month to avoid late fees."
+            action="View Payments"
+            actionColor="bg-green-600 hover:bg-green-700"
+            onClick={() => navigate("/payments")}
+          />
+        </div>
+
+        {/* Admin Quick Actions - Only for Admins */}
+        {isAdmin && (
+          <div className="mt-12 bg-white rounded-2xl shadow-lg p-8 border border-slate-200">
+            <h3 className="text-xl font-bold text-slate-900 mb-6">
+              Admin Quick Actions
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <AdminActionBtn
+                title="Manage Students"
+                onClick={() => navigate("/admin/students")}
+              />
+              <AdminActionBtn
+                title="Manage Rooms"
+                onClick={() => navigate("/rooms")}
+              />
+              <AdminActionBtn
+                title="View Reports"
+                onClick={() => navigate("/complaints")}
+              />
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-/* small presentational pieces */
+/* Component Library */
 
-function StatCard({ title, hint, value, loading }) {
-  return (
-    <div className="bg-white rounded-lg p-4 shadow-sm border border-slate-100 flex flex-col justify-between">
-      <div>
-        <div className="flex items-center justify-between">
-          <div className="text-sm font-medium text-slate-600">{title}</div>
-          <div className="text-xs text-slate-400">{hint}</div>
-        </div>
-
-        <div className="mt-4 flex items-end gap-3">
-          <div className="text-3xl font-semibold text-slate-900">
-            {loading ? (
-              <div className="h-8 w-20 bg-slate-200 rounded animate-pulse" />
-            ) : (
-              value
-            )}
-          </div>
-          <div className="text-xs text-slate-400">updated</div>
-        </div>
-      </div>
-      <div className="mt-4 text-xs text-slate-400">
-        Updated: {new Date().toLocaleString()}
-      </div>
-    </div>
-  );
-}
-
-function ActionCard({ title, subtitle, onClick }) {
+function QuickActionCard({ title, description, icon, color, onClick }) {
   return (
     <button
       onClick={onClick}
-      className="w-full text-left p-4 bg-slate-50 rounded border border-slate-100 hover:shadow-sm transition"
+      className={`${color} text-white rounded-2xl p-6 shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 text-left`}
     >
-      <div className="text-sm font-medium text-slate-800">{title}</div>
-      <div className="text-xs text-slate-500 mt-1">{subtitle}</div>
+      <div className="text-4xl mb-3">{icon}</div>
+      <h3 className="text-xl font-bold mb-2">{title}</h3>
+      <p className="text-sm text-white/90">{description}</p>
     </button>
   );
 }
 
-function SummaryLine({ label, value, actionText, onClick }) {
+function StatCard({ title, value, loading, icon }) {
   return (
-    <div className="flex items-center justify-between">
-      <div>
-        <div className="text-xs text-slate-500">{label}</div>
-        <div className="font-medium text-slate-800">{value}</div>
+    <div className="bg-white rounded-xl p-6 shadow-md border border-slate-200 hover:shadow-lg transition-shadow">
+      <div className="flex items-center justify-between mb-3">
+        <div className="text-2xl">{icon}</div>
+        <div className="text-xs font-medium text-slate-500 uppercase tracking-wide">
+          {title}
+        </div>
       </div>
-      {actionText ? (
-        <button
-          onClick={onClick}
-          className="px-3 py-1 bg-green-600 text-white rounded text-sm"
-        >
-          {actionText}
-        </button>
-      ) : null}
+      <div className="text-3xl font-bold text-slate-900">
+        {loading ? (
+          <div className="h-8 w-16 bg-slate-200 rounded animate-pulse" />
+        ) : (
+          value
+        )}
+      </div>
     </div>
+  );
+}
+
+function InfoCard({ title, description, action, actionColor, onClick }) {
+  return (
+    <div className="bg-white rounded-2xl p-8 shadow-lg border border-slate-200">
+      <h3 className="text-xl font-bold text-slate-900 mb-3">{title}</h3>
+      <p className="text-slate-600 mb-6">{description}</p>
+      <button
+        onClick={onClick}
+        className={`${actionColor} text-white px-6 py-3 rounded-lg font-medium transition-colors`}
+      >
+        {action}
+      </button>
+    </div>
+  );
+}
+
+function AdminActionBtn({ title, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      className="bg-slate-50 hover:bg-slate-100 border-2 border-slate-200 rounded-xl p-4 font-medium text-slate-700 transition-colors"
+    >
+      {title}
+    </button>
   );
 }
